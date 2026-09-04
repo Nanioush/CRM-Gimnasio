@@ -9,11 +9,13 @@ class Reports:
 
     def students_by_activity(self):
         rows = self.db.fetchall(
-            """SELECT COALESCE(activity,'Sin asignar') activity, COUNT(*) total
-               FROM students
-               WHERE active=1
-               GROUP BY activity
-               ORDER BY total DESC"""
+            """SELECT a.name activity, COUNT(DISTINCT sa.student_id) total
+               FROM student_activities sa
+               JOIN activities a ON a.id=sa.activity_id
+               JOIN students s ON s.id=sa.student_id
+               WHERE s.active=1
+               GROUP BY a.id, a.name
+               ORDER BY total DESC, a.name"""
         )
         return pd.DataFrame([dict(row) for row in rows])
 

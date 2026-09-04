@@ -1,0 +1,13 @@
+V7 FINAL
+
+- Soporte real para la cuota Adulto 2 actividades - 64 €.
+- Relación alumno-actividad normalizada mediante student_activities.
+- Migración automática de alumnos creados en versiones anteriores.
+- El Dashboard cuenta correctamente alumnos en ambas actividades.
+- Estadísticas con Pandas/Matplotlib cuentan ambas actividades.
+- Asistencias solo permite elegir actividades asignadas al alumno.
+- Evita registrar dos veces la misma asistencia el mismo día.
+- Profesores pueden vincularse a una o varias actividades.
+- La tabla de profesores muestra automáticamente las actividades vinculadas.
+- Se mantienen pagos mensuales automáticos Pendiente/Pagado.
+- Se mantiene la arquitectura UI / Data / Services / Reports / Config.

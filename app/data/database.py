@@ -1,9 +1,9 @@
 import sqlite3
 from pathlib import Path
-from datetime import date
 from app.config.settings import DEFAULT_ACTIVITIES
 
 DB_PATH = Path(__file__).resolve().parents[2] / "gimnasio.db"
+
 
 class Database:
     def __init__(self, path=DB_PATH):
@@ -12,6 +12,7 @@ class Database:
     def connect(self):
         conn = sqlite3.connect(self.path)
         conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA foreign_keys = ON")
         return conn
 
     def initialize(self):
@@ -27,6 +28,8 @@ class Database:
             )
             """)
 
+            # Se mantiene activity por compatibilidad con versiones anteriores.
+            # La relación real alumno-actividad está en student_activities.
             cur.execute("""
             CREATE TABLE IF NOT EXISTS students (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -35,7 +38,7 @@ class Database:
                 phone TEXT,
                 email TEXT,
                 birth_date TEXT,
-                plan TEXT NOT NULL DEFAULT 'Adulto',
+                plan TEXT NOT NULL,
                 activity TEXT,
                 join_date TEXT NOT NULL,
                 active INTEGER NOT NULL DEFAULT 1
@@ -60,7 +63,17 @@ class Database:
                 teacher_id INTEGER,
                 schedule TEXT,
                 capacity INTEGER DEFAULT 20,
-                FOREIGN KEY(teacher_id) REFERENCES teachers(id)
+                FOREIGN KEY(teacher_id) REFERENCES teachers(id) ON DELETE SET NULL
+            )
+            """)
+
+            cur.execute("""
+            CREATE TABLE IF NOT EXISTS student_activities (
+                student_id INTEGER NOT NULL,
+                activity_id INTEGER NOT NULL,
+                PRIMARY KEY(student_id, activity_id),
+                FOREIGN KEY(student_id) REFERENCES students(id) ON DELETE CASCADE,
+                FOREIGN KEY(activity_id) REFERENCES activities(id) ON DELETE CASCADE
             )
             """)
 
@@ -71,7 +84,7 @@ class Database:
                 activity TEXT NOT NULL,
                 date TEXT NOT NULL,
                 present INTEGER NOT NULL DEFAULT 1,
-                FOREIGN KEY(student_id) REFERENCES students(id)
+                FOREIGN KEY(student_id) REFERENCES students(id) ON DELETE CASCADE
             )
             """)
 
@@ -84,11 +97,10 @@ class Database:
                 date TEXT NOT NULL,
                 status TEXT NOT NULL DEFAULT 'Pendiente',
                 billing_month TEXT,
-                FOREIGN KEY(student_id) REFERENCES students(id)
+                FOREIGN KEY(student_id) REFERENCES students(id) ON DELETE CASCADE
             )
             """)
 
-            # Migración para bases creadas por versiones anteriores.
             payment_columns = {
                 row["name"] for row in cur.execute("PRAGMA table_info(payments)").fetchall()
             }
@@ -101,6 +113,22 @@ class Database:
                 WHERE billing_month IS NOT NULL
             """)
 
+            # Limpia posibles duplicados de versiones anteriores antes
+            # de aplicar la restricción de una asistencia por alumno/actividad/día.
+            cur.execute("""
+                DELETE FROM attendance
+                WHERE id NOT IN (
+                    SELECT MIN(id)
+                    FROM attendance
+                    GROUP BY student_id, activity, date
+                )
+            """)
+
+            cur.execute("""
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_attendance_daily
+                ON attendance(student_id, activity, date)
+            """)
+
             cur.execute("""
             CREATE TABLE IF NOT EXISTS invoices (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -110,13 +138,10 @@ class Database:
                 concept TEXT NOT NULL,
                 issue_date TEXT NOT NULL,
                 status TEXT NOT NULL DEFAULT 'Emitida',
-                FOREIGN KEY(student_id) REFERENCES students(id)
+                FOREIGN KEY(student_id) REFERENCES students(id) ON DELETE CASCADE
             )
             """)
 
-            # Garantiza una cuenta administrativa funcional.
-            # INSERT OR IGNORE crea el usuario si no existe y el UPDATE
-            # corrige credenciales de una base creada por una versión anterior.
             cur.execute(
                 "INSERT OR IGNORE INTO users(username, password, role) VALUES(?,?,?)",
                 ("admin", "admin123", "admin")
@@ -129,17 +154,34 @@ class Database:
             for name in DEFAULT_ACTIVITIES:
                 cur.execute("INSERT OR IGNORE INTO activities(name) VALUES(?)", (name,))
 
+            # Migración de alumnos creados en V1-V6: pasa la actividad antigua
+            # a la nueva tabla relacional si todavía no existe.
+            legacy_students = cur.execute(
+                """SELECT id, activity FROM students
+                   WHERE activity IS NOT NULL AND TRIM(activity) <> ''"""
+            ).fetchall()
+            for student in legacy_students:
+                activity = cur.execute(
+                    "SELECT id FROM activities WHERE name=?",
+                    (student["activity"],)
+                ).fetchone()
+                if activity:
+                    cur.execute(
+                        """INSERT OR IGNORE INTO student_activities(student_id, activity_id)
+                           VALUES(?,?)""",
+                        (student["id"], activity["id"])
+                    )
+
             conn.commit()
 
     def authenticate(self, username, password):
         username = (username or "").strip()
         password = (password or "").strip()
         with self.connect() as conn:
-            cur = conn.execute(
+            return conn.execute(
                 "SELECT * FROM users WHERE lower(username)=lower(?) AND password=?",
                 (username, password)
-            )
-            return cur.fetchone()
+            ).fetchone()
 
     def fetchall(self, query, params=()):
         with self.connect() as conn:
@@ -154,7 +196,6 @@ class Database:
             cur = conn.execute(query, params)
             conn.commit()
             return cur.lastrowid
-
 
     def execute_many(self, query, params_sequence):
         with self.connect() as conn:
