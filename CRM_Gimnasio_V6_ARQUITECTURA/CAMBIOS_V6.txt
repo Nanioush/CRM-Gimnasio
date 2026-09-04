@@ -1,0 +1,8 @@
+V6 - Arquitectura solicitada por el profesor
+
+- Configuración centralizada en app/config/settings.py.
+- Cuotas y actividades base salen de Configuración.
+- Lógica de pagos automáticos y Dashboard en app/services/business.py.
+- Estadísticas preparadas mediante app/reports/reports.py y Pandas.
+- La interfaz gráfica deja de hacer directamente parte de la lógica de negocio.
+- Se mantienen Login, SQLite, PySide6, Pandas y Matplotlib.
